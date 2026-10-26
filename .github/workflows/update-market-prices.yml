@@ -31,7 +31,10 @@ jobs:
           source = 'https://goldpricestoday.net/api/v1/egypt.json'
           request = urllib.request.Request(
               source,
-              headers={'accept': 'application/json'},
+              headers={
+                  'accept': 'application/json',
+                  'user-agent': 'Mozilla/5.0 (compatible; Ma3akKamPriceUpdater/1.0)',
+              },
           )
           with urllib.request.urlopen(request, timeout=20) as response:
               payload = json.load(response)
