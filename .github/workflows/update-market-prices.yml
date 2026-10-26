@@ -39,6 +39,13 @@ jobs:
           with urllib.request.urlopen(request, timeout=20) as response:
               payload = json.load(response)
 
+          fx_request = urllib.request.Request(
+              'https://open.er-api.com/v6/latest/USD',
+              headers={'accept': 'application/json'},
+          )
+          with urllib.request.urlopen(fx_request, timeout=20) as response:
+              fx_payload = json.load(response)
+
           gold = {
               str(karat): {
                   'gram': values.get('gram'),
@@ -49,13 +56,20 @@ jobs:
               if isinstance(values, dict) and values.get('gram') is not None
           }
           fx = payload.get('fx', {})
+          usd_to_egp = fx.get('rate') or fx_payload.get('rates', {}).get('EGP')
+          currency_rates = {'EGP': 1.0}
+          for code in ('USD', 'EUR', 'SAR', 'AED', 'GBP'):
+              usd_rate = fx_payload.get('rates', {}).get(code)
+              if usd_to_egp and usd_rate:
+                  currency_rates[code] = usd_to_egp / usd_rate
           data = {
               'schemaVersion': 1,
               'provider': 'goldpricestoday',
               'updatedAt': payload.get('updated') or datetime.now(timezone.utc).isoformat(),
               'currency': 'EGP',
               'gold': gold,
-              'rates': {'USD': 1, 'EGP': fx.get('rate')} if fx.get('rate') else {},
+              'rates': currency_rates,
+              'ratesUpdatedAt': fx_payload.get('time_last_update_utc'),
           }
 
           target = Path('data/market_prices.json')
@@ -72,5 +86,5 @@ jobs:
             echo "No price changes"
             exit 0
           fi
-          git commit -m "chore: update Egyptian market prices"
+          git commit -m 'chore: update Egyptian market prices'
           git push
