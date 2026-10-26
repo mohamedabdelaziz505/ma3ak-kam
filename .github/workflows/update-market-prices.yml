@@ -1,0 +1,72 @@
+name: Update Egyptian market prices
+on:
+  workflow_dispatch:
+  schedule:
+    # GitHub may delay scheduled jobs by a few minutes during busy periods.
+    - cron: '*/10 * * * *'
+permissions:
+  contents: write
+concurrency:
+  group: market-prices
+  cancel-in-progress: true
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Fetch GoldTimo prices
+        env:
+          GOLDTIMO_API_KEY: ${{ secrets.GOLDTIMO_API_KEY }}
+        run: |
+          if [ -z "$GOLDTIMO_API_KEY" ]; then
+            echo "Missing repository secret GOLDTIMO_API_KEY"
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+          from datetime import datetime, timezone
+          from pathlib import Path
+          base = 'https://goldtimo.com/api/v1'
+          key = os.environ['GOLDTIMO_API_KEY']
+          def get(path):
+              request = urllib.request.Request(
+                  base + path,
+                  headers={'x-api-key': key, 'accept': 'application/json'},
+              )
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  return json.load(response)
+          gold = {}
+          for karat in (18, 21, 24):
+              payload = get(f'/price/XAU/EGP/{karat}')
+              gold[str(karat)] = {
+                  'gram': payload.get('gram'),
+                  'price': payload.get('price'),
+                  'updatedAt': payload.get('updatedAt'),
+              }
+          rates_payload = get('/rates')
+          data = {
+              'schemaVersion': 1,
+              'provider': 'goldtimo',
+              'updatedAt': datetime.now(timezone.utc).isoformat(),
+              'currency': 'EGP',
+              'gold': gold,
+              'rates': rates_payload.get('rates', {}),
+          }
+          target = Path('data/market_prices.json')
+          target.parent.mkdir(parents=True, exist_ok=True)
+          target.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          PY
+      - name: Commit changed prices
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/market_prices.json
+          if git diff --cached --quiet; then
+            echo "No price changes"
+            exit 0
+          fi
+          git commit -m "chore: update Egyptian market prices"
+          git push
